@@ -1,0 +1,446 @@
+---
+title: "Business Impact Evaluation: Streaming Recommendation Engine Experiment"
+author: "Hayley M"
+date: "2026"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE
+)
+```
+## Executive Summary
+
+This analysis evaluates whether the new recommendation engine increases average daily viewing hours compared to the existing system.
+
+The results indicate that Group B users watched more hours on average than the control group. Statistical testing suggests this difference may be meaningful, however, analysis of group composition reveals demographic imbalance between treatment groups, particularly in gender distribution. This imbalance introduces potential bias and limits the strength of the causal conclusion.
+
+While the findings indicate that the new engine may improve engagement, it is recommended that the company conduct a follow-up A/B test using stratified randomisation to ensure balanced demographic representation before full rollout.
+
+## 1. Business Context
+
+This streaming service operates in an increasingly competitive streaming market where user engagement directly influences advertising revenue and long-term customer retention.
+
+To improve engagement, the streamer deployed a revised recommendation engine to a subset of subscribers (Group B) while maintaining the existing system for a control group (Group A). The objective of this experiment was to determine whether the new algorithm increases average daily viewing hours.
+
+In addition to measuring engagement uplift, this analysis evaluates the integrity of the experimental design, including potential sampling bias and limitations that may affect the validity of the results.
+
+## 2. Data Preparation
+
+The dataset contains subscriber-level information including demographic attributes, engagement history, and daily viewing hours. The A/B test went live at 12:01am on 18 July, with Group B receiving the updated recommendation engine and Group A remaining as control.
+
+To ensure analysis reflects post-intervention behaviour, observations prior to the intervention date were excluded.
+
+Key variables used in the analysis include:
+
+- **Hours_Watched_Per_Day** (primary outcome variable)
+- **Group** (A = Control, B = Treatment)
+- **Age**
+- **Gender**
+- **Social_Metric** (prior engagement indicator)
+- **Demographic**
+- **Months_Active**
+
+The dataset was cleaned and renamed for clarity prior to analysis.
+
+```{r, echo = TRUE, warnings = FALSE, message=FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(lubridate)
+library(pwr)
+
+```
+
+```{r}
+
+streaming_data <- read_csv("streaming_data.csv")
+
+streaming_data$date <- lubridate::as_date(streaming_data$date, format = "%d-%b")
+
+#filter to include only testing period
+streaming <- streaming_data %>% filter(date > '2023-07-17')
+
+streaming <- streaming %>%
+  rename("Date" = "date",
+         "Gender" = "gender",
+         "Age" = "age",
+         "Social_Metric" = "social_metric",
+         "Months_Active" = "time_since_signup",
+         "Demographic" = "demographic",
+         "Group" = "group",
+         "Hours_Watched_Per_Day" = "hours_watched"
+         )
+
+```
+
+# Part I — Analytical Investigation
+
+## 3. Exploratory Data Analysis
+Initial exploratory analysis was conducted to understand relationships between demographic variables, engagement behaviour, and treatment allocation.
+
+```{r}
+#understanding relationships between variables
+GGally::ggpairs(streaming, columns = c(2, 4, 5, 7, 8), aes(color = Group, alpha = 0.5),    
+        xlab = "X Customer Data",
+        ylab = "Y Customer Data",
+        title = "Streaming Data Visualization")
+```
+
+## 3. Regression Analysis: Drivers of Viewing Behaviour
+Linear regression models were used to evaluate whether age, demographic grouping, and prior engagement metrics were associated with daily viewing hours.
+
+```{r}
+#exploring linear regression
+demographic_hours <- streaming %>%
+  ggplot(aes(x = Demographic, y = Hours_Watched_Per_Day, color = Group)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    x = 'Demographic', 
+    y = 'Hours Watched',
+    color = 'Group',
+    title = 'Impact of Recommendation Engine on Demographic'
+  )
+demographic_hours
+
+#subsetting genders
+Female <- streaming %>%
+  filter(Demographic %in% c("1", "3"))
+
+Male <- streaming %>%
+  filter(Demographic %in% c("2", "4"))
+
+#female, age, hours linear regression
+female_age <- Female %>%
+  ggplot(aes(x = Age, y = Hours_Watched_Per_Day, color = Group)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    x = 'Female Age', 
+    y = 'Hours',
+    color = 'Group',
+    title = 'Impact of Recommendation Engine for Females'
+  )
+female_age
+
+#male, age, hours linear regression
+male_age <- Male %>%
+  ggplot(aes(x = Age, y = Hours_Watched_Per_Day, color = Group)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    x = 'Male Age', 
+    y = 'Hours',
+    color = 'Group',
+    title = 'Impact of Recommendation Engine for Males'
+  )
+male_age
+
+#weak negative linear regression
+age_hours <- streaming %>%
+  ggplot(aes(x = Age, y = Hours_Watched_Per_Day, color = Group)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    x = 'Age', 
+    y = 'Hours',
+    color = 'Group',
+    title = 'Impact of Recommendation Engine on Age'
+  )
+age_hours
+
+#no obvious correlation
+social_hours <- streaming %>%
+  ggplot(aes(x = Months_Active, y = Hours_Watched_Per_Day, color = Group)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    x = 'Social Metric', 
+    y = 'Hours',
+    color = 'Group',
+    title = 'Correlation Between Social Metric and Hours Watched'
+  )
+social_hours
+
+```
+
+## 4. Model Diagnostics
+Diagnostic plots were used to assess regression assumptions, including linearity, homoscedasticity, and residual normality.
+
+```{r}
+#lm function for linear regression - females
+female1 <- lm(Hours_Watched_Per_Day ~ Age, data = Female)
+female1 %>% summary()
+
+#lm function for linear regression - males
+male1 <- lm(Hours_Watched_Per_Day ~ Age, data = Male)
+male1 %>% summary()
+
+#lm function for linear regression
+agevshoursmodel <- lm(Hours_Watched_Per_Day ~ Age, data = streaming)
+agevshoursmodel %>% summary()
+
+#this results in a higher R-squared score, however unclear about the social metric score
+agesocial <- lm(Hours_Watched_Per_Day ~ Age + Social_Metric, data = streaming)
+summary(agesocial)
+
+#this results in a lower R squared score
+demog <- lm(Hours_Watched_Per_Day ~ Demographic, data = streaming)
+summary(demog)
+
+social <- lm(Hours_Watched_Per_Day ~ Social_Metric, data = streaming)
+summary(social)
+
+```
+
+```{r}
+#linear regression line over variables
+
+plot(Hours_Watched_Per_Day ~ Age, data = streaming, xlab = "Age of Subscriber", ylab = "Hours Watched Per Day")
+abline(agevshoursmodel, col= "red")
+
+plot(Hours_Watched_Per_Day ~ Age, data = Male, xlab = "Age of Male Subscriber", ylab = "Hours Watched Per Day")
+abline(male1, col= "blue")
+
+plot(Hours_Watched_Per_Day ~ Age, data = Female, xlab = "Age of Female Subscriber", ylab = "Hours Watched Per Day")
+abline(female1, col= "yellow")
+
+plot(Hours_Watched_Per_Day ~ Demographic, data = streaming, xlab = "Demographic", ylab = "Hours Watched Per Day")
+abline(demog, col= "orange")
+
+```
+
+```{r}
+#checking linear regression assumptions
+
+plot(agevshoursmodel)
+plot(female1)
+plot(male1)
+```
+
+## 5. Experimental Integrity and Bias Assessment
+Prior to interpreting treatment effects, group composition was examined to assess potential sampling bias.
+
+```{r fig.width = 5, fig.height = 3.5}
+
+#checking for bias
+
+#filter for group A and B
+B_group <- streaming %>%
+  filter(Group == "B")
+
+A_group <- streaming %>%
+  filter(Group == "A")
+
+# count total numbers in each group
+total_a <- sum(streaming$Group == 'A')
+total_b <- sum(streaming$Group == 'B')
+
+# Group A male to female
+male_a <- sum(A_group$Gender == 'M')
+#male_a = 169
+female_a <- sum(A_group$Gender == 'F')
+#female_a = 163
+
+#gender ratio - more males 1
+mf_ratio_a <- male_a/female_a
+#More males in group A - male ratio to female is 1.03
+
+#Group B male to female
+male_b <- sum(B_group$Gender == 'M')
+#male_b = 91
+female_b <- sum(B_group$Gender == 'F')
+#female_b = 29
+mf_ratio_b <- male_b/female_b
+#Higher ratio of males in group B - male ratio to female is 3.138
+
+#plot age distribution for each group
+qqplot(A_group$Age, B_group$Age,
+        main = 'Population of Age in Group A and B',
+        xlab = 'Group A Age Distribution', 
+       ylab = 'Group B Age Distribution')
+
+#filter for distinct demographics in each group (A)
+demog_a <- A_group %>% 
+  group_by(Demographic) %>% 
+  summarize(n_dem_a = n()) %>% 
+  distinct()
+
+#filter for distinct demographics in each group (B)
+demog_b <- B_group %>% 
+  group_by(Demographic) %>% 
+  summarize(n_dem_b = n()) %>% 
+  distinct()
+
+#proportions of each demographics in each group
+demog_a$p_a <- demog_a$n_dem_a / total_a
+demog_b$p_b <- demog_b$n_dem_b / total_b
+
+qqplot(demog_a$n_dem_a, demog_b$n_dem_b, 
+       main = 'Population of Demographic Subgroup in Group A and B',
+       xlab = 'Group A Demographic Distribution', 
+       ylab = 'Group B Demographic Distribution')
+```
+
+## 6. Subgroup Impact Analysis
+Subgroup-level comparisons were performed to assess heterogeneity in treatment effects across demographic segments.
+
+```{r}
+
+#check the difference in means - 2 demographic
+a2_data1 <- streaming %>% 
+  filter(Group == 'A') %>% 
+  group_by(Age, Social_Metric) %>% 
+  summarise(n_a = n(), mean_hours_a = mean(Hours_Watched_Per_Day), sda = sd(Hours_Watched_Per_Day),
+            .groups = 'drop')
+
+b2_data1 <- streaming %>% 
+  filter(Group == 'B') %>% 
+  group_by(Age, Social_Metric) %>% 
+  summarise(n_b = n(), mean_hours_b = mean(Hours_Watched_Per_Day), sdb = sd(Hours_Watched_Per_Day),
+            .groups = 'drop')
+
+#sample metrics are different so isn't a direct comparison
+stats_3 <- inner_join(a2_data1, b2_data1)
+
+#difference of means for demographics
+stats_3$diff <- stats_3$mean_hours_b - stats_3$mean_hours_a
+
+stats_3$diff %>% mean()
+
+#sd pooled for all sub groups in demographics
+stats_3$sdpooled <- sqrt(((stats_3$n_a-1)*stats_3$sda^2 + (stats_3$n_b-1)*stats_3$sdb^2) / (stats_3$n_a+stats_3$n_b-2))
+
+#find the effect size for each sub group
+stats_3$effect <- (stats_3$mean_hours_b-stats_3$mean_hours_a)/stats_3$sdpooled
+
+#calculate the t-value
+stats_3$t_statistic <- (stats_3$mean_hours_b-stats_3$mean_hours_a)/sqrt((stats_3$sdpooled/stats_3$n_a)+(stats_3$sdpooled/stats_3$n_b))
+
+#calculate the degree of freedom
+stats_3$df <- stats_3$n_a+stats_3$n_b-2
+
+stats_3
+
+# Subgroup-level aggregation resulted in insufficient overlap between segments, limiting reliable comparison at this granularity.
+
+```
+
+```{r}
+
+#check variance
+boxplot(Hours_Watched_Per_Day ~ Demographic, data = streaming)
+
+#check normality
+
+shapiro.test(streaming$Hours_Watched_Per_Day)
+
+```
+
+## 7. Statistical Significance and Power Analysis
+Statistical testing and effect size estimation were conducted to determine the magnitude and reliability of observed engagement differences.
+
+```{r}
+#check the difference in means and run t-test - 1 demographic
+a_data1 <- streaming %>%  
+  filter(Group == 'A') %>% 
+  group_by(Demographic) %>% 
+  summarise(Population_A = n(), Mean_Hours_A = mean(Hours_Watched_Per_Day), SDA = sd(Hours_Watched_Per_Day),
+            .groups = 'drop')
+
+b_data1 <- streaming %>% 
+  filter(Group == 'B') %>% 
+  group_by(Demographic) %>% 
+  summarise(Population_B = n(), Mean_Hours_B = mean(Hours_Watched_Per_Day), SDB = sd(Hours_Watched_Per_Day),
+            .groups = 'drop')
+
+#sample metrics are different so isn't a direct comparison
+demog_df <- inner_join(a_data1, b_data1)
+
+demog_df$Pop_Ratio <- demog_df$Population_A/demog_df$Population_B
+#difference of means for demographics
+demog_df$Difference_of_Mean <- demog_df$Mean_Hours_B - demog_df$Mean_Hours_A
+
+#sd pooled for all 4 demographics
+demog_df$SD_Pooled <- sqrt(((demog_df$Population_A-1)*demog_df$SDA^2 + (demog_df$Population_B-1)*demog_df$SDB^2) / (demog_df$Population_A+demog_df$Population_B-2))
+
+#find the effect size for each demographic (1,2,3,4)
+demog_df$Effect_Size <- (demog_df$Mean_Hours_B-demog_df$Mean_Hours_A)/demog_df$SD_Pooled
+
+#find the t-value
+demog_df$T_statistic <- (demog_df$Mean_Hours_B-demog_df$Mean_Hours_A)/sqrt((demog_df$SD_Pooled/demog_df$Population_A)+(demog_df$SD_Pooled/demog_df$Population_B))
+
+#find the degree of freedom
+demog_df$Degree_Freedom <- demog_df$Population_A+demog_df$Population_B-2
+```  
+P-values for subgroup comparisons were evaluated using standard two-sample t-tests. Detailed calculations are omitted for brevity, with emphasis placed on effect size interpretation and sample adequacy.
+
+```{r}
+demog_df
+```  
+
+```{r}
+#checking statistical significance and sample size
+p_values <- streaming %>%
+  group_by(Demographic) %>%
+  summarise(
+    p_value = t.test(Hours_Watched_Per_Day ~ Group)$p.value,
+    .groups = "drop"
+  )
+
+# Join p-values back into main table
+demog_df <- left_join(demog_df, p_values, by = "Demographic")
+
+```
+```{r}
+
+alpha <- 0.01
+min_samp <- 33
+
+demog_df$Significant <- demog_df$p_value < alpha
+demog_df$Min_Sample <- demog_df$Population_B > min_samp
+```
+
+```{r}
+#find minimum sample size
+pwr.t.test(n = NULL, 
+           d = 0.8, 
+           sig.level = 0.01, 
+           power = 0.8, 
+           type = "two.sample", 
+           alternative = "two.sided")
+
+```
+
+```{r}
+
+#showing statistical significance outcomes visually
+
+plot_dem <- demog_df
+
+final <- ggplot()
+
+final <- ggplot(plot_dem, aes(x = Demographic, y = Difference_of_Mean, fill = p_value))
+final <- final + geom_tile(color = "transparent", size = 0.5)
+final <- final + labs(title = "Statistical Significance of Difference in Average Viewing Hours", x = "Demographic", y = "Average Difference in Viewing Hours Per Day", fill = "P_Value")
+final <- final + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+final
+
+```
+
+# Part II — Final Conclusion and Business Recommendation
+
+## Final Conclusion
+
+The analysis indicates modest differences in engagement between treatment and control groups. While the treatment group demonstrated slightly higher viewing hours, the observed uplift is not sufficiently isolated from demographic variation to support strong causal claims.
+
+## Business Recommendation
+
+Given the potential commercial impact of even small engagement increases, a follow-up experiment is recommended. The next test should implement stratified randomisation to ensure balanced demographic representation and strengthen causal inference.
+
+## Limitations
+
+This analysis reflects a single experimental window and a limited set of observable behavioural variables. Engagement outcomes may be influenced by additional factors not captured in the dataset.
+
