@@ -31,3 +31,16 @@ Before full deployment, a follow-up experiment using stratified randomisation is
 
 - `ab_test_recommendation_engine.Rmd` — Full analytical workflow
 - `ab_test_recommendation_engine.html` — Rendered business report
+
+## Requirements
+
+R version 4.0+
+
+Required packages:
+
+- dplyr
+- ggplot2
+- readr
+- lubridate
+- pwr
+- GGally
