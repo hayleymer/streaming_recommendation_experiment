@@ -120,9 +120,12 @@ Demographic imbalance introduces confounding effects that weaken causal conclusi
 The analysis revealed several critical insights:
 
 - The new recommendation engine may improve engagement  
+
+<img width="1750" height="1081" alt="difference_viewing_hours" src="https://github.com/user-attachments/assets/9f05d612-90d1-493b-8b89-b168064cc0a4" />
+
 - Demographic imbalance between treatment and control groups introduces bias  
 - Gender and demographic composition differed significantly between groups  
-- Structural imbalance weakens causal interpretation of observed differences  
+- Structural imbalance weakens causal interpretation of observed differences
 
 This demonstrates the importance of experimental design integrity in evaluating algorithm performance.
 
